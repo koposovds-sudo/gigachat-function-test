@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Тестовый чат-клиент для Yandex Cloud Function и GigaChat">
+  <title>Проверка GigaChat через Cloud Function</title>
+  <style>
+    :root { color-scheme: light; --bg:#f4f7fb; --panel:#fff; --ink:#142033; --muted:#65738a; --line:#dce3ee; --accent:#315bd7; --accent-dark:#2345ac; --user:#e8efff; --bot:#f2f5f9; --danger:#b42318; }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--ink); background:linear-gradient(145deg,#f5f8ff 0%,var(--bg) 55%,#eef3fb 100%); }
+    main { width:min(920px,100%); margin:0 auto; padding:32px 16px; }
+    .hero { margin-bottom:18px; }
+    h1 { margin:0 0 8px; font-size:clamp(1.5rem,4vw,2.25rem); }
+    .hero p { margin:0; color:var(--muted); line-height:1.5; }
+    .status { display:flex; align-items:center; gap:8px; margin-top:14px; color:var(--muted); font-size:.92rem; }
+    .dot { width:10px; height:10px; border-radius:50%; background:#8a97a8; }
+    .dot.ok { background:#12b76a; } .dot.wait { background:#f79009; } .dot.error { background:#f04438; }
+    .chat { min-height:430px; max-height:60vh; overflow:auto; padding:18px; border:1px solid var(--line); border-radius:18px 18px 0 0; background:var(--panel); box-shadow:0 16px 45px rgba(32,55,91,.08); }
+    .message { max-width:min(78%,680px); margin:0 0 14px; padding:12px 14px; border-radius:14px; white-space:pre-wrap; line-height:1.48; }
+    .message.user { margin-left:auto; background:var(--user); border-bottom-right-radius:4px; }
+    .message.bot { background:var(--bot); border-bottom-left-radius:4px; }
+    .message.error { background:#fff0ef; color:var(--danger); }
+    .meta { margin:0 0 5px; color:var(--muted); font-size:.78rem; }
+    form { padding:14px; border:1px solid var(--line); border-top:0; border-radius:0 0 18px 18px; background:var(--panel); box-shadow:0 16px 45px rgba(32,55,91,.08); }
+    textarea { display:block; width:100%; min-height:86px; resize:vertical; border:1px solid var(--line); border-radius:12px; padding:12px; font:inherit; color:var(--ink); outline:none; }
+    textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(49,91,215,.14); }
+    .controls { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:10px; }
+    .file-label, button { border:0; border-radius:10px; padding:10px 14px; font:inherit; font-weight:650; cursor:pointer; }
+    .file-label { color:var(--accent); background:#eef3ff; }
+    input[type=file] { display:none; }
+    button { margin-left:auto; color:#fff; background:var(--accent); }
+    button:hover:not(:disabled) { background:var(--accent-dark); }
+    button:disabled { cursor:not-allowed; opacity:.64; }
+    #fileName { flex:1 1 180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:.9rem; }
+    .note { margin:14px 3px 0; color:var(--muted); font-size:.85rem; line-height:1.45; }
+    code { padding:1px 4px; border-radius:4px; background:#edf1f7; }
+    @media (max-width:560px) { main { padding:22px 12px; } .chat { min-height:390px; } .message { max-width:90%; } button { margin-left:0; width:100%; } }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero" aria-labelledby="title">
+      <h1 id="title">Проверка GigaChat через Cloud Function</h1>
+      <p>Мини-клиент отправляет текст и выбранный файл в вашу Yandex Cloud Function. Секреты и ключ GigaChat должны оставаться на стороне функции.</p>
+      <div class="status" role="status" aria-live="polite"><span id="dot" class="dot"></span><span id="statusText">Готово к проверке</span></div>
+    </section>
+    <section id="chat" class="chat" aria-label="История переписки">
+      <div class="message bot"><div class="meta">GigaChat</div>Здравствуйте! Напишите сообщение или приложите файл — запрос будет отправлен через Cloud Function.</div>
+    </section>
+    <form id="chatForm">
+      <label for="message">Сообщение</label>
+      <textarea id="message" name="message" placeholder="Например: кратко опиши содержимое приложенного документа" required></textarea>
+      <div class="controls">
+        <label class="file-label" for="file">Прикрепить файл</label>
+        <input id="file" name="file" type="file" accept="image/*,.pdf,.txt,.doc,.docx">
+        <span id="fileName">Файл не выбран</span>
+        <button id="send" type="submit">Отправить</button>
+      </div>
+    </form>
+    <p class="note">Ожидаемый контракт функции: принимает <code>multipart/form-data</code> с полями <code>message</code> и необязательным <code>file</code>; возвращает JSON вида <code>{"answer":"..."}</code>. Если функция использует другой контракт, измените блок <code>fetch</code> в <code>index.html</code>.</p>
+  </main>
+  <script>
+    const FUNCTION_URL = 'https://functions.yandexcloud.net/d4e6gg7qd3tlqotvn86c';
+    const form = document.getElementById('chatForm');
+    const chat = document.getElementById('chat');
+    const message = document.getElementById('message');
+    const file = document.getElementById('file');
+    const fileName = document.getElementById('fileName');
+    const send = document.getElementById('send');
+    const dot = document.getElementById('dot');
+    const statusText = document.getElementById('statusText');
+
+    function setStatus(text, type = '') { dot.className = `dot ${type}`; statusText.textContent = text; }
+    function addMessage(text, role, extraClass = '') {
+      const node = document.createElement('article');
+      node.className = `message ${role} ${extraClass}`.trim();
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = role === 'user' ? 'Вы' : 'GigaChat';
+      const body = document.createElement('div');
+      body.textContent = text;
+      node.append(meta, body);
+      chat.append(node);
+      chat.scrollTop = chat.scrollHeight;
+      return node;
+    }
+    file.addEventListener('change', () => { fileName.textContent = file.files[0]?.name || 'Файл не выбран'; });
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const text = message.value.trim();
+      if (!text) return;
+      const formData = new FormData();
+      formData.append('message', text);
+      if (file.files[0]) formData.append('file', file.files[0]);
+      addMessage(file.files[0] ? `${text}\n\nФайл: ${file.files[0].name}` : text, 'user');
+      message.value = '';
+      file.value = '';
+      fileName.textContent = 'Файл не выбран';
+      send.disabled = true;
+      setStatus('Отправляю запрос в Cloud Function…', 'wait');
+      const pending = addMessage('GigaChat формирует ответ…', 'bot');
+      try {
+        const response = await fetch(FUNCTION_URL, { method: 'POST', body: formData });
+        const raw = await response.text();
+        let data;
+        try { data = raw ? JSON.parse(raw) : {}; } catch { data = { answer: raw }; }
+        if (!response.ok) throw new Error(data.error || data.message || `HTTP ${response.status}`);
+        const answer = data.answer || data.response || data.message || data.result?.answer || JSON.stringify(data);
+        pending.querySelector('div:last-child').textContent = answer;
+        setStatus('Ответ получен', 'ok');
+      } catch (error) {
+        pending.classList.add('error');
+        pending.querySelector('.meta').textContent = 'Ошибка соединения';
+        pending.querySelector('div:last-child').textContent = `${error.message}\n\nПроверьте URL, CORS-настройки функции и ожидаемый формат запроса.`;
+        setStatus('Запрос завершился ошибкой', 'error');
+      } finally { send.disabled = false; message.focus(); }
+    });
+  </script>
+</body>
+</html>
